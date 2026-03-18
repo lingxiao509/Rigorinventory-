@@ -807,7 +807,7 @@ function rInOut(){
   h+=`<div style="font-size:17px;font-weight:700;color:${cl};margin-bottom:14px">${isIn?"▲ 入库":"▼ 出库"}</div>`;
   h+=`<div class="card" style="cursor:default"><div style="font-size:13px;color:#fff">${d.s} · ${d.c}</div><div style="font-size:11px;color:#6b7280">当前: ${d.n}</div></div>`;
   h+=`<div class="form-row"><div class="form-label">数量 *</div><input class="inp" type="number" id="ioQty" placeholder="输入数量"></div>`;
-  h+=`<div class="form-row"><div class="form-label">批号</div><input class="inp" id="ioBat" placeholder="如 20260316"></div>`;
+  h+=`<div class="form-row"><div class="form-label">批号</div><input class="inp" id="ioBat" value="${d.b||""}" placeholder="如 20260316"></div>`;
   h+=`<div class="form-row"><div class="form-label">日期</div><input class="inp" type="date" id="ioDt" value="${new Date().toISOString().slice(0,10)}"></div>`;
   h+=`<div class="form-row"><div class="form-label">备注</div><textarea class="inp" id="ioNt" rows="2" style="resize:vertical"></textarea></div>`;
   h+=`<button class="btn" style="background:${cl}" onclick="doIO()">确认${isIn?"入库":"出库"}</button></div>`;
