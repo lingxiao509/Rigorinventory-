@@ -93,7 +93,7 @@ input,select,textarea,button{font-family:inherit;outline:none}
     <input type="password" id="loginPwd" placeholder="输入密码" style="width:100%;padding:12px 16px;border-radius:10px;border:1px solid #2a2e3e;background:#181b24;color:#e5e7eb;font-size:15px;text-align:center;outline:none;margin-bottom:12px;font-family:inherit" onkeydown="if(event.key==='Enter')checkLogin()">
     <button onclick="checkLogin()" style="width:100%;padding:12px;border-radius:10px;border:none;background:#6366f1;color:#fff;font-size:15px;font-weight:600;cursor:pointer;font-family:inherit">进入系统</button>
     <div id="loginErr" style="font-size:12px;color:#f87171;margin-top:10px;display:none">密码错误，请重试</div>
-    <div style="font-size:10px;color:#374151;margin-top:20px">如需修改密码，请在「☁ 同步」页面设置</div>
+    <div style="font-size:10px;color:#374151;margin-top:20px">登录后 24 小时内无需重复输入密码</div>
   </div>
 </div>
 <div id="app" class="app-wrap" style="display:none"></div>
@@ -108,7 +108,7 @@ async function checkLogin(){
   if(!pwd){document.getElementById("loginErr").style.display="block";document.getElementById("loginErr").textContent="请输入密码";return;}
   const h=await hashPwd(pwd);
   if(h===getStoredHash()){
-    sessionStorage.setItem("RIGOR_AUTH","1");
+    localStorage.setItem("RIGOR_AUTH",String(Date.now()));
     document.getElementById("loginScreen").style.display="none";
     document.getElementById("app").style.display="block";
   }else{
@@ -146,8 +146,10 @@ function openChangePwd(){
   </div>`;
   document.body.appendChild(ov);
 }
-// Auto-login if session still valid
-if(sessionStorage.getItem("RIGOR_AUTH")==="1"){
+function doLogout(){localStorage.removeItem("RIGOR_AUTH");location.reload();}
+// Auto-login if session still valid (24 hours)
+const _authTs=parseInt(localStorage.getItem("RIGOR_AUTH")||"0");
+if(_authTs&&(Date.now()-_authTs)<86400000){
   document.getElementById("loginScreen").style.display="none";
   document.getElementById("app").style.display="block";
 }
@@ -171,6 +173,23 @@ const fs=c=>{for(const s of SERIES)if(s.sub.includes(c))return s;return SERIES[0
 const ROOT="RIGOR_Data";
 const smap={"PS微球":"PolyRef/PS","PMMA微球":"PolyRef/PMMA","PET微球":"PolyRef/PET","PE微球":"PolyRef/PE","PP微球":"PolyRef/PP","PVC微球":"PolyRef/PVC","功能化PS微球":"PolyRef/PS-Func","PS荧光微球(绿)":"PolyRef/PS-FL-Green","PS荧光微球(橙红)":"PolyRef/PS-FL-Orange","PS荧光微球(蓝)":"PolyRef/PS-FL-Blue","PMMA荧光微球(绿)":"PolyRef/PMMA-FL-Green","PMMA荧光微球(橙红)":"PolyRef/PMMA-FL-Orange","PMMA荧光微球(蓝)":"PolyRef/PMMA-FL-Blue","染色PS微球":"PolyRef/PS-Dyed","磁性微球":"PolyRef/Magnetic","生物磁珠":"RigorMag/BioMag","生物磁珠&微球":"RigorMag/BioMag","离心柱":"RigorPrep/SpinColumn","色谱柱":"RigorMAb/HPLCColumn","96孔板":"RigorPlate/Plate"};
 function makePath(d){const base=smap[d.c]||"Other/"+d.c.replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g,"_");const sku=(d.k||d.m||"item").replace(/[\\/:*?"<>|\s]+/g,"_");const bat=(d.b||"nobatch").replace(/[\\/:*?"<>|\s]+/g,"_");return ROOT+"/"+base+"/"+sku+"_"+bat;}
+
+// ═══ 外部批号转换 ═══
+// 编码规则: [系列1位][月份1位][年份1位][日期2位][产线1位][颜色1位(可选)]
+// 月份: 1-9=Jan-Sep, A=Oct, B=Nov, C=Dec
+// 年份: 末位数字 (2025→5, 2026→6)
+const SERIES_CODE={"PS微球":"P","PMMA微球":"P","PET微球":"P","PE微球":"P","PP微球":"P","PVC微球":"P","功能化PS微球":"P","PS荧光微球(绿)":"F","PS荧光微球(橙红)":"F","PS荧光微球(蓝)":"F","PMMA荧光微球(绿)":"F","PMMA荧光微球(橙红)":"F","PMMA荧光微球(蓝)":"F","染色PS微球":"C","磁性微球":"M","生物磁珠":"B","离心柱":"S","色谱柱":"H"};
+const COLOR_CODE={"PS荧光微球(绿)":"G","PS荧光微球(橙红)":"O","PS荧光微球(蓝)":"B","PMMA荧光微球(绿)":"G","PMMA荧光微球(橙红)":"O","PMMA荧光微球(蓝)":"B"};
+function genExtBatch(cat,batch,line){
+  if(!batch||batch.length<8)return"";
+  const s=SERIES_CODE[cat]||"X";
+  const y=batch.substring(0,4);const m=parseInt(batch.substring(4,6));const day=batch.substring(6,8);
+  const mCode="ABCDEFGHIJKL".charAt(m-1)||"X";
+  const yCode=y.charAt(3);
+  const ln=line||"1";
+  const clr=COLOR_CODE[cat]||"";
+  return s+mCode+yCode+day+ln+clr;
+}
 
 // ═══ SUPABASE + LOCAL STORAGE (国内可用，免费) ═══
 let items, allLogs, pipe, lastSync="";
@@ -333,7 +352,9 @@ const _sbCfg=getSBConfig();
 if(_sbCfg)initSupabase(_sbCfg);
 
 if(!loadFromStorage()){
-  items=RAW.map((d,i)=>({id:i,c:d.c,s:d.s,f:d.f,m:d.m,k:d.k,b:d.b,q:d.q,n:d.n,t:d.t,o:d.o,qc:{},logs:[],att:[]}));
+  items=RAW.map((d,i)=>({id:i,c:d.c,s:d.s,f:d.f,m:d.m,k:d.k,b:d.b,q:d.q,n:d.n,t:d.t,o:d.o,ln:d.ln||"1",eb:d.eb||"",pr:d.pr||"",qc:{},logs:[],att:[]}));
+  // Auto-generate external batch for items without one
+  items.forEach(d=>{if(!d.eb&&d.b)d.eb=genExtBatch(d.c,d.b,d.ln);});
   allLogs=[];
   pipe=[
     {id:1,nm:"PET纳米微球多规格攻关",pr:"P0",ph:"Week 1-2",st:"进行中",tg:"300-500nm+500-1μm",nt:"50/100nm已就绪"},
@@ -357,10 +378,13 @@ window._composing=false;
 // Get all unique categories (dynamic)
 function getCats(){return[...new Set(items.map(d=>d.c))].sort();}
 function getAllStatuses(){return["正常","低库存","缺货","研发中","待包装","待处理","待开发","待启动"];}
+const PRIO={"":{l:"",b:"",t:"",i:""},"🔴 紧急":{l:"🔴 紧急",b:"#5c1a1a",t:"#f87171",i:"🔴"},"🟠 优先":{l:"🟠 优先",b:"#6b3a00",t:"#fbbf24",i:"🟠"},"🟡 一般":{l:"🟡 一般",b:"#5c4d1a",t:"#facc15",i:"🟡"},"⚪ 暂缓":{l:"⚪ 暂缓",b:"#1e2130",t:"#6b7280",i:"⚪"}};
+function getPrios(){return["🔴 紧急","🟠 优先","🟡 一般","⚪ 暂缓",""];}
 
 function nav(v){V=v;delMode=false;pipeEditId=null;subCatF="全部";render();}
 function setFilter(sid){serF=sid;subCatF="全部";V="list";delMode=false;render();}
 function setSubCat(cat){subCatF=cat;render();}
+function jumpToStatus(st){serF="全部";subCatF="全部";stF=st;V="list";delMode=false;render();}
 function toggleDelMode(){delMode=!delMode;render();}
 function copyPath(p){navigator.clipboard.writeText(p).then(()=>{});}
 
@@ -468,7 +492,7 @@ function rDash(){
   const sn=items.filter(d=>d.t==="正常").length,sl=items.filter(d=>d.t==="低库存").length,so=items.filter(d=>d.t==="缺货").length,sr2=items.filter(d=>d.t==="研发中").length;
   let h=`<div style="padding:20px"><div style="display:flex;align-items:center;gap:12px;margin-bottom:20px"><div style="width:48px;height:48px;border-radius:14px;background:linear-gradient(135deg,#6366f1,#8b5cf6);display:flex;align-items:center;justify-content:center;font-size:24px;color:#fff">⬡</div><div><div style="font-size:20px;font-weight:700;color:#fff">RIGOR 库存 & 研发</div><div style="font-size:13px;color:#6b7280">${items.length} SKU · ${sbConnected?`<span style="color:#34d399">☁ 实时同步</span>`:(lastSync?`<span style="color:#fbbf24">本地</span>`:"")}</div></div></div>`;
   h+=`<div class="dash-stats" style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:18px">`;
-  [{l:"正常",v:sn,c:"#34d399"},{l:"低库存",v:sl,c:"#fbbf24"},{l:"缺货",v:so,c:"#f87171"},{l:"研发中",v:sr2,c:"#c084fc"}].forEach(x=>{h+=`<div class="card" style="cursor:default"><div style="font-size:11px;color:#6b7280">${x.l}</div><div style="font-size:24px;font-weight:700;color:${x.c}">${x.v}</div></div>`;});
+  [{l:"正常",v:sn,c:"#34d399"},{l:"低库存",v:sl,c:"#fbbf24"},{l:"缺货",v:so,c:"#f87171"},{l:"研发中",v:sr2,c:"#c084fc"}].forEach(x=>{h+=`<div class="card" style="cursor:pointer" onclick="jumpToStatus('${x.l}')"><div style="font-size:11px;color:#6b7280">${x.l}</div><div style="font-size:24px;font-weight:700;color:${x.c}">${x.v}</div></div>`;});
   h+=`</div>`;
   // Series
   h+=`<div style="font-size:15px;font-weight:600;color:#9ca3af;margin-bottom:10px">📦 产品系列</div>`;
@@ -626,7 +650,7 @@ function rListItems(){
   let h=`<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 20px 8px"><span style="font-size:12px;color:#4b5563">${fl.length} 条记录${subCatF!=="全部"&&subCatF!=="__all__"?` · ${subCatF}`:""}</span><button onclick="toggleDelMode()" style="font-size:11px;padding:4px 12px;border-radius:6px;border:1px solid ${delMode?'#f87171':'#2a2e3e'};background:${delMode?'#5c1a1a':'transparent'};color:${delMode?'#f87171':'#6b7280'};cursor:pointer">${delMode?'✓ 完成':'🗑️ 管理'}</button></div>`;
   h+=`<div style="padding:0 10px">`;
   fl.forEach(d=>{const st=gs(d.t);const sr=fs(d.c);const qd=QC.filter(q=>d.qc[q.id]).length;
-    h+=`<div class="item" onclick="${delMode?'':`selId=${d.id};V='detail';render()`}"><div style="width:6px;height:6px;border-radius:50%;background:${st.d};flex-shrink:0"></div><div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><span style="font-size:15px;font-weight:600;color:#fff">${d.s||"—"}</span><span style="font-size:11px;color:${sr.color}">${d.c}</span>${d.f&&d.f!=="无"&&d.f!==""?`<span style="font-size:10px;padding:1px 6px;border-radius:3px;background:#1e2130;color:#818cf8">${d.f}</span>`:""}</div><div style="font-size:12px;color:#4b5563;margin-top:2px">${d.m||""}${d.k?" · "+d.k:""}${qd?` <span style="color:${qd>=6?"#34d399":"#fbbf24"}">QC ${qd}/6</span>`:""}</div></div><div style="text-align:right;flex-shrink:0"><div style="font-size:16px;font-weight:700;color:${st.t}">${d.n>0?d.n:"—"}</div><span class="tag" style="background:${st.b};color:${st.t}">${d.t}</span></div>${delMode?`<button onclick="event.stopPropagation();doDelete(${d.id})" style="background:none;border:none;color:#f87171;cursor:pointer;font-size:18px;padding:6px 8px;flex-shrink:0">✕</button>`:""}</div>`;
+    h+=`<div class="item" onclick="${delMode?'':`selId=${d.id};V='detail';render()`}"><div style="width:6px;height:6px;border-radius:50%;background:${st.d};flex-shrink:0"></div><div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><span style="font-size:15px;font-weight:600;color:#fff">${d.s||"—"}</span><span style="font-size:11px;color:${sr.color}">${d.c}</span>${d.f&&d.f!=="无"&&d.f!==""?`<span style="font-size:10px;padding:1px 6px;border-radius:3px;background:#1e2130;color:#818cf8">${d.f}</span>`:""}</div><div style="font-size:12px;color:#4b5563;margin-top:2px">${d.m||""}${d.k?" · "+d.k:""}${qd?` <span style="color:${qd>=6?"#34d399":"#fbbf24"}">QC ${qd}/6</span>`:""}${d.pr?` <span style="font-size:10px">${PRIO[d.pr]?.i||""}</span>`:""}</div></div><div style="text-align:right;flex-shrink:0"><div style="font-size:16px;font-weight:700;color:${st.t}">${d.n>0?d.n:"—"}</div><span class="tag" style="background:${st.b};color:${st.t}">${d.t}</span></div>${delMode?`<button onclick="event.stopPropagation();doDelete(${d.id})" style="background:none;border:none;color:#f87171;cursor:pointer;font-size:18px;padding:6px 8px;flex-shrink:0">✕</button>`:""}</div>`;
   });
   if(!fl.length)h+=`<div style="text-align:center;padding:40px;color:#4b5563">无匹配产品</div>`;
   h+=`</div>`;return h;
@@ -683,7 +707,8 @@ function rAddEdit(d){
     ["f","官能团/类型","如 羧基-COOH, 蛋白A, 无"],
     ["m","型号","如 PS01010CM"],
     ["k","货号","如 PS02N100NA"],
-    ["b","发货批号","如 20260316"],
+    ["b","内部批号(YYYYMMDD)","如 20260316"],
+    ["ln","产线编号(1位)","默认1"],
   ];
   fields.forEach(([key,label,ph])=>{
     h+=`<div class="form-row"><div class="form-label">${label}</div><input class="inp" id="f_${key}" value="${d?d[key]||"":""}" placeholder="${ph}"></div>`;
@@ -694,7 +719,15 @@ function rAddEdit(d){
   h+=`<div class="form-row"><div class="form-label">库存状态</div><select class="inp" id="f_t">`;
   getAllStatuses().forEach(s=>{h+=`<option value="${s}"${d&&d.t===s?" selected":""}>${s}</option>`;});
   h+=`</select></div>`;
+  // Priority
+  h+=`<div class="form-row"><div class="form-label">备货优先级</div><select class="inp" id="f_pr"><option value=""${!d||!d.pr?" selected":""}>— 未设置 —</option>`;
+  getPrios().filter(p=>p).forEach(p=>{h+=`<option value="${p}"${d&&d.pr===p?" selected":""}>${p}</option>`;});
+  h+=`</select></div>`;
   h+=`</div>`;
+  // External batch (full width, with auto-generate)
+  const curEB=d?d.eb:"";
+  h+=`<div class="form-row"><div class="form-label">🏷️ 客户批号（自动生成或手动输入，用于标签和COA）</div>`;
+  h+=`<div style="display:flex;gap:8px"><input class="inp" id="f_eb" value="${curEB}" placeholder="点右侧按钮自动生成" style="flex:1;font-family:monospace;font-size:15px;letter-spacing:1px"><button class="sm" style="background:#2563eb;white-space:nowrap;padding:8px 14px" onclick="autoGenEB()">自动生成</button></div></div>`;
   // Notes (full width)
   h+=`<div class="form-row"><div class="form-label">备注</div><textarea class="inp" id="f_o" rows="2" style="resize:vertical">${d?d.o||"":""}</textarea></div>`;
 
@@ -720,20 +753,34 @@ function getFormData(){
     m:document.getElementById("f_m").value.trim(),
     k:document.getElementById("f_k").value.trim(),
     b:document.getElementById("f_b").value.trim(),
+    ln:document.getElementById("f_ln").value.trim()||"1",
+    eb:document.getElementById("f_eb").value.trim(),
     n:parseInt(document.getElementById("f_n").value)||0,
     t:document.getElementById("f_t").value,
+    pr:document.getElementById("f_pr").value,
     o:document.getElementById("f_o").value.trim()
   };
+}
+
+function autoGenEB(){
+  const cat=document.getElementById("fCat").value;
+  const batch=document.getElementById("f_b").value.trim();
+  const ln=document.getElementById("f_ln").value.trim()||"1";
+  if(!batch||batch.length<8){alert("请先填写内部批号（YYYYMMDD格式）");return;}
+  const realCat=(cat==="__new__")?document.getElementById("fCatNew").value.trim():cat;
+  const eb=genExtBatch(realCat,batch,ln);
+  document.getElementById("f_eb").value=eb;
 }
 
 function doAdd(){
   const data=getFormData();
   if(!data){alert("请填写产品分类和粒径/规格");return;}
+  // Auto-gen external batch if empty
+  if(!data.eb&&data.b)data.eb=genExtBatch(data.c,data.b,data.ln);
   const newItem={id:nextId++,...data,q:String(data.n),qc:{},logs:[],att:[]};
   items.push(newItem);
-  // Add to series if new category
   const sr=fs(data.c);
-  if(!sr.sub.includes(data.c)){SERIES[0].sub.push(data.c);}// default to PolyRef
+  if(!sr.sub.includes(data.c)){SERIES[0].sub.push(data.c);}
   selId=newItem.id;V="detail";render();
 }
 
@@ -741,6 +788,8 @@ function doEdit(id){
   const data=getFormData();
   if(!data){alert("请填写产品分类和粒径/规格");return;}
   const d=items.find(i=>i.id===id);if(!d)return;
+  // Auto-gen external batch if empty and batch changed
+  if(!data.eb&&data.b)data.eb=genExtBatch(data.c,data.b,data.ln);
   Object.assign(d,data);d.q=String(data.n);
   if(!fs(data.c).sub.includes(data.c)){SERIES[0].sub.push(data.c);}
   V="detail";render();
@@ -777,11 +826,26 @@ function rDetail(){
   // Info + edit button
   h+=`<div class="card" style="cursor:default"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><span style="font-size:12px;font-weight:600;color:#9ca3af">产品信息</span><div style="display:flex;gap:6px"><button class="edit-btn" onclick="V='edit';render()">✏️ 编辑</button><button class="del-btn" onclick="doDelete(${d.id})">🗑️ 删除</button></div></div>`;
   h+=`<div class="detail-info" style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;font-size:13px">`;
-  [["型号",d.m],["货号",d.k],["批号",d.b],["库存原始",d.q||String(d.n)]].forEach(([l,v])=>{h+=`<div><span style="color:#6b7280">${l}：</span><span style="color:#e5e7eb">${v||"—"}</span></div>`;});
-  h+=`</div>${d.o?`<div style="margin-top:6px;padding:5px 7px;border-radius:5px;background:#1a1d27;color:#fbbf24;font-size:10px">${d.o}</div>`:""}`;
+  [["型号",d.m],["货号",d.k],["内部批号",d.b],["库存原始",d.q||String(d.n)]].forEach(([l,v])=>{h+=`<div><span style="color:#6b7280">${l}：</span><span style="color:#e5e7eb">${v||"—"}</span></div>`;});
+  h+=`</div>`;
+  // External batch display
+  const extB=d.eb||genExtBatch(d.c,d.b,d.ln);
+  if(extB){
+    h+=`<div style="margin-top:8px;padding:10px;border-radius:8px;background:linear-gradient(135deg,#1e3a5f,#1a1d27);border:1px solid #2563eb40">`;
+    h+=`<div style="display:flex;justify-content:space-between;align-items:center"><div><div style="font-size:10px;color:#60a5fa;margin-bottom:2px">🏷️ 客户批号 (用于标签/COA)</div><div style="font-size:18px;font-weight:700;color:#fff;font-family:monospace;letter-spacing:1px">${extB}</div></div><button class="copy-btn" onclick="copyPath('${extB}')">复制</button></div>`;
+    h+=`<div style="font-size:10px;color:#4b5563;margin-top:4px">COA文件名: <span style="color:#7dd3fc;font-family:monospace">COA_${d.k}_${extB}.pdf</span></div>`;
+    h+=`</div>`;
+  }
+  h+=`${d.o?`<div style="margin-top:6px;padding:5px 7px;border-radius:5px;background:#1a1d27;color:#fbbf24;font-size:10px">${d.o}</div>`:""}`;
   h+=`<div style="margin-top:8px;padding-top:8px;border-top:1px solid #1e2130"><div style="font-size:10px;color:#60a5fa;margin-bottom:4px">📁 ${fp}/</div><button class="copy-btn" onclick="copyPath('${fp}/')">复制路径</button></div></div>`;
   // In/Out buttons
   h+=`<div style="display:flex;gap:8px;margin-bottom:10px"><button class="btn" style="background:#059669" onclick="startIO(${d.id},'in')">▲ 入库</button><button class="btn" style="background:#dc2626" onclick="startIO(${d.id},'out')">▼ 出库</button></div>`;
+  // Restock priority
+  const curP=d.pr||"";
+  h+=`<div class="card" style="cursor:default"><div style="font-size:12px;font-weight:600;color:#fbbf24;margin-bottom:8px">📦 备货优先级</div><div style="display:flex;gap:6px;flex-wrap:wrap">`;
+  getPrios().filter(p=>p).forEach(p=>{const pi=PRIO[p];h+=`<button onclick="setPrio(${d.id},'${p}')" style="padding:6px 12px;border-radius:6px;border:1px solid ${curP===p?pi.t+"80":"#2a2e3e"};background:${curP===p?pi.b:"transparent"};color:${curP===p?pi.t:"#6b7280"};font-size:12px;cursor:pointer">${p}</button>`;});
+  if(curP)h+=`<button onclick="setPrio(${d.id},'')" style="padding:6px 10px;border-radius:6px;border:1px solid #2a2e3e;background:transparent;color:#4b5563;font-size:11px;cursor:pointer">清除</button>`;
+  h+=`</div></div>`;
   // QC
   h+=`<div class="card" style="cursor:default"><div style="font-size:12px;font-weight:600;color:#c084fc;margin-bottom:8px">🧪 QC检测 (${d.b||"—"})</div><div class="qcg">`;
   QC.forEach(q=>{const on=d.qc[q.id];h+=`<button class="qcb${on?" on":""}" onclick="toggleQC(${d.id},'${q.id}')"><span style="font-size:14px">${on?"✓":q.i}</span><span>${q.l}</span></button>`;});
@@ -807,7 +871,9 @@ function rInOut(){
   h+=`<div style="font-size:17px;font-weight:700;color:${cl};margin-bottom:14px">${isIn?"▲ 入库":"▼ 出库"}</div>`;
   h+=`<div class="card" style="cursor:default"><div style="font-size:13px;color:#fff">${d.s} · ${d.c}</div><div style="font-size:11px;color:#6b7280">当前: ${d.n}</div></div>`;
   h+=`<div class="form-row"><div class="form-label">数量 *</div><input class="inp" type="number" id="ioQty" placeholder="输入数量"></div>`;
-  h+=`<div class="form-row"><div class="form-label">批号</div><input class="inp" id="ioBat" value="${d.b||""}" placeholder="如 20260316"></div>`;
+  h+=`<div class="form-row"><div class="form-label">内部批号</div><input class="inp" id="ioBat" value="${d.b||""}" placeholder="如 20260316" oninput="updateIOExtBatch()"></div>`;
+  const curExtB=d.eb||genExtBatch(d.c,d.b,d.ln);
+  h+=`<div style="padding:8px 10px;border-radius:6px;background:#1e3a5f30;border:1px solid #2563eb30;margin-bottom:10px"><div style="font-size:10px;color:#60a5fa;margin-bottom:2px">🏷️ 对应客户批号</div><div id="ioExtBat" style="font-size:16px;font-weight:700;color:#fff;font-family:monospace;letter-spacing:1px">${curExtB||"—"}</div></div>`;
   h+=`<div class="form-row"><div class="form-label">日期</div><input class="inp" type="date" id="ioDt" value="${new Date().toISOString().slice(0,10)}"></div>`;
   h+=`<div class="form-row"><div class="form-label">备注</div><textarea class="inp" id="ioNt" rows="2" style="resize:vertical"></textarea></div>`;
   h+=`<button class="btn" style="background:${cl}" onclick="doIO()">确认${isIn?"入库":"出库"}</button></div>`;
@@ -821,13 +887,20 @@ function doIO(){
   const bt=document.getElementById("ioBat").value,dt=document.getElementById("ioDt").value;
   const pv=d.n,nx=modal.tp==="in"?d.n+qt:Math.max(0,d.n-qt);
   d.n=nx;d.t=nx===0?"缺货":nx<=5?"低库存":"正常";
-  if(modal.tp==="in"&&bt)d.b=bt;
-  d.logs.push({tp:modal.tp,qt,bt,dt,pv,nx});
+  if(modal.tp==="in"&&bt){d.b=bt;d.eb=genExtBatch(d.c,bt,d.ln);}
+  d.logs.push({tp:modal.tp,qt,bt,dt,pv,nx,eb:d.eb});
   allLogs.push({tp:modal.tp,qt,dt,nm:d.s+" "+d.c});
   modal=null;V="detail";render();
 }
+function updateIOExtBatch(){
+  const d=items.find(i=>i.id===selId);if(!d)return;
+  const bt=document.getElementById("ioBat").value.trim();
+  const el=document.getElementById("ioExtBat");if(!el)return;
+  el.textContent=bt.length>=8?genExtBatch(d.c,bt,d.ln):"—";
+}
 
 function toggleQC(id,qid){const d=items.find(i=>i.id===id);if(d){d.qc[qid]=!d.qc[qid];render();}}
+function setPrio(id,pr){const d=items.find(i=>i.id===id);if(d){d.pr=pr;render();}}
 
 function openAttach(id){
   const d=items.find(i=>i.id===id);if(!d)return;const fp=makePath(d);
@@ -1047,7 +1120,7 @@ create policy "Allow all" on rigor_inventory for all using (true) with check (tr
   // Password management
   h+=`<div class="card" style="cursor:default"><div style="font-size:13px;font-weight:600;color:#fbbf24;margin-bottom:8px">🔒 访问密码</div>`;
   h+=`<div style="font-size:12px;color:#9ca3af;margin-bottom:10px">默认密码: <span style="color:#818cf8;font-family:monospace">rigor2026</span>，建议修改</div>`;
-  h+=`<button class="btn" style="background:#92400e" onclick="openChangePwd()">修改登录密码</button></div>`;
+  h+=`<div style="display:flex;gap:8px"><button class="btn" style="background:#92400e;flex:1" onclick="openChangePwd()">修改密码</button><button class="btn" style="background:#374151;flex:1" onclick="doLogout()">退出登录</button></div></div>`;
 
   h+=`<div class="card" style="cursor:default"><div style="font-size:13px;font-weight:600;color:#9ca3af;margin-bottom:8px">💾 备份 & 恢复</div>`;
   h+=`<div style="display:flex;gap:8px;margin-bottom:8px"><button class="btn" style="background:#1e3a5f;flex:1" onclick="exportData()">📤 导出 JSON</button><button class="btn" style="background:#1e2130;border:1px solid #2a2e3e;flex:1" onclick="importData()">📥 导入 JSON</button></div>`;
